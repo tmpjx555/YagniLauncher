@@ -17,15 +17,23 @@
  */
 package com.eblan.launcher.domain.framework
 
-import com.eblan.launcher.domain.model.iconpackinfo.IconPackInfoComponent
+import com.eblan.launcher.domain.model.iconpackinfo.IconPackComponent
+import com.eblan.launcher.domain.model.userdata.IconShape
+import com.eblan.launcher.domain.model.userdata.IconTint
+import com.eblan.launcher.domain.model.userdata.Theme
 import java.io.File
 
 interface IconPackManager {
-    suspend fun getIconPackInfoComponents(packageName: String): List<IconPackInfoComponent>
+    suspend fun getIconPackComponents(packageName: String): List<IconPackComponent>
 
-    suspend fun createIconPackInfoPath(
+    suspend fun createIconPackPath(
         packageName: String,
         drawableName: String,
         file: File,
+        iconTint: IconTint,
+        iconShape: IconShape,
+        customIconTint: Int,
+        fallbackIconTint: Boolean,
+        theme: Theme,
     ): String?
 }

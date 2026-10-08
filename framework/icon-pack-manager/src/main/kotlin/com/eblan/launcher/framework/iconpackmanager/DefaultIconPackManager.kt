@@ -21,11 +21,17 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.content.res.XmlResourceParser
 import android.graphics.drawable.Drawable
+import android.os.Build
+import android.util.TypedValue
 import com.eblan.launcher.common.AndroidImageSerializer
 import com.eblan.launcher.domain.common.Dispatcher
 import com.eblan.launcher.domain.common.EblanDispatchers
 import com.eblan.launcher.domain.framework.IconPackManager
-import com.eblan.launcher.domain.model.iconpackinfo.IconPackInfoComponent
+import com.eblan.launcher.domain.framework.WallpaperManagerWrapper
+import com.eblan.launcher.domain.model.iconpackinfo.IconPackComponent
+import com.eblan.launcher.domain.model.userdata.IconShape
+import com.eblan.launcher.domain.model.userdata.IconTint
+import com.eblan.launcher.domain.model.userdata.Theme
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.currentCoroutineContext
@@ -41,10 +47,11 @@ import javax.inject.Inject
 internal class DefaultIconPackManager @Inject constructor(
     @param:ApplicationContext private val context: Context,
     private val imageSerializer: AndroidImageSerializer,
+    private val wallpaperManagerWrapper: WallpaperManagerWrapper,
     @param:Dispatcher(EblanDispatchers.IO) private val ioDispatcher: CoroutineDispatcher,
 ) : IconPackManager,
     AndroidIconPackManager {
-    override suspend fun getIconPackInfoComponents(packageName: String): List<IconPackInfoComponent> = withContext(ioDispatcher) {
+    override suspend fun getIconPackComponents(packageName: String): List<IconPackComponent> = withContext(ioDispatcher) {
         try {
             val packageContext = context.createPackageContext(
                 packageName,
@@ -91,10 +98,15 @@ internal class DefaultIconPackManager @Inject constructor(
         }
     }
 
-    override suspend fun createIconPackInfoPath(
+    override suspend fun createIconPackPath(
         packageName: String,
         drawableName: String,
         file: File,
+        iconTint: IconTint,
+        iconShape: IconShape,
+        customIconTint: Int,
+        fallbackIconTint: Boolean,
+        theme: Theme,
     ): String? = withContext(ioDispatcher) {
         val packageContext =
             context.createPackageContext(packageName, Context.CONTEXT_IGNORE_SECURITY)
@@ -104,11 +116,25 @@ internal class DefaultIconPackManager @Inject constructor(
         val resId = resources.getIdentifier(drawableName, "drawable", packageName)
 
         if (resId != 0) {
+            val drawable = resources.getDrawable(
+                resId,
+                packageContext.theme,
+            )
+
+            val transformedDrawable = imageSerializer.getTintedAndShapedDrawable(
+                drawable = drawable,
+                iconTint = iconTint,
+                customIconTint = when (iconTint) {
+                    IconTint.System -> getSystemIconTintColor()
+                    else -> customIconTint
+                },
+                fallbackIconTint = fallbackIconTint,
+                theme = theme,
+                iconShape = iconShape,
+            ) ?: return@withContext null
+
             imageSerializer.createDrawablePath(
-                drawable = resources.getDrawable(
-                    resId,
-                    packageContext.theme,
-                ),
+                drawable = transformedDrawable,
                 file = file,
             )
 
@@ -117,6 +143,27 @@ internal class DefaultIconPackManager @Inject constructor(
             null
         }
     }
+
+    private fun getSystemAccentColor(): Int {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            return context.getColor(android.R.color.system_accent1_600)
+        }
+
+        val value = TypedValue()
+
+        return if (context.theme.resolveAttribute(
+                android.R.attr.colorAccent,
+                value,
+                true,
+            )
+        ) {
+            value.data
+        } else {
+            context.getColor(android.R.color.holo_blue_dark)
+        }
+    }
+
+    private fun getSystemIconTintColor(): Int = wallpaperManagerWrapper.getSystemWallpaperColor() ?: getSystemAccentColor()
 
     override suspend fun loadDrawableFromIconPack(
         packageName: String,
@@ -139,7 +186,7 @@ internal class DefaultIconPackManager @Inject constructor(
         }
     }
 
-    private suspend fun parseXml(xmlPullParser: XmlPullParser): List<IconPackInfoComponent> {
+    private suspend fun parseXml(xmlPullParser: XmlPullParser): List<IconPackComponent> {
         var eventType = xmlPullParser.eventType
 
         return buildList {
@@ -151,7 +198,7 @@ internal class DefaultIconPackManager @Inject constructor(
 
                     if (component != null && drawable != null) {
                         add(
-                            IconPackInfoComponent(
+                            IconPackComponent(
                                 componentName = component,
                                 drawableName = drawable,
                             ),
